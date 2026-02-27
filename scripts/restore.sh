@@ -31,6 +31,8 @@ check_saved_session_exists() {
 	local resurrect_file="$(last_resurrect_file)"
 	if [ ! -f $resurrect_file ]; then
 		display_message "Tmux resurrect file not found!"
+		# Ensure that on a new session that pane 0 is replaced with one that has a history ID
+		prepare_initial_state
 		return 1
 	fi
 }
@@ -175,7 +177,9 @@ new_pane() {
 
 restore_pane() {
 	local pane="$1"
-	while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_full_command; do
+	while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_full_command hist_id; do
+		# History ID stored in the restore stamp so pane can set its own history (bashrc)
+		echo $hist_id > $HOME/.tmux/.restore_in_progress
 		dir="$(remove_first_char "$dir")"
 		pane_full_command="$(remove_first_char "$pane_full_command")"
 		if [ "$session_name" == "0" ]; then
@@ -202,6 +206,8 @@ restore_pane() {
 		fi
 		# set pane title
 		tmux select-pane -t "$session_name:$window_number.$pane_index" -T "$pane_title"
+		# Allow shell to start and restore history before continuing
+		sleep 1
 	done < <(echo "$pane")
 }
 
@@ -284,6 +290,13 @@ handle_session_0() {
 	fi
 }
 
+prepare_initial_state() {
+	# Create a new pane (as 0 won't be used in future restores) and wipe out pane 0
+	# This prevents the existence of a pane 0 history.
+	new_pane "0" "1" "$HOME" "1"
+	tmux kill-pane -t "%0"
+}
+
 restore_window_properties() {
 	local window_name
 	\grep '^window' $(last_resurrect_file) |
@@ -301,6 +314,14 @@ restore_window_properties() {
 				tmux set-option -t "${session_name}:${window_number}" automatic-rename "$automatic_rename"
 			fi
 		done
+}
+
+pre_restore() {
+	touch $HOME/.tmux/.restore_in_progress
+}
+
+post_restore() {
+	rm -f $HOME/.tmux/.restore_in_progress
 }
 
 restore_all_pane_processes() {
@@ -366,10 +387,12 @@ cleanup_restored_pane_contents() {
 main() {
 	if supported_tmux_version_ok && check_saved_session_exists; then
 		start_spinner "Restoring..." "Tmux restore complete!"
+		pre_restore
 		execute_hook "pre-restore-all"
 		restore_all_panes
 		handle_session_0
 		restore_window_properties >/dev/null 2>&1
+		execute_hook "pre-restore-history"
 		execute_hook "pre-restore-pane-processes"
 		restore_all_pane_processes
 		# below functions restore exact cursor positions
@@ -380,6 +403,7 @@ main() {
 		restore_active_and_alternate_sessions
 		cleanup_restored_pane_contents
 		execute_hook "post-restore-all"
+		post_restore
 		stop_spinner
 		display_message "Tmux restore complete!"
 	fi

@@ -49,6 +49,8 @@ pane_format() {
 	format+="${delimiter}"
 	format+="#{pane_pid}"
 	format+="${delimiter}"
+	format+="#{pane_id}"
+	format+="${delimiter}"
 	format+="#{history_size}"
 	echo "$format"
 }
@@ -189,14 +191,15 @@ fetch_and_dump_grouped_sessions(){
 dump_panes() {
 	local full_command
 	dump_panes_raw |
-		while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_pid history_size; do
+		while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_pid pane_id history_size; do
 			# not saving panes from grouped sessions
 			if is_session_grouped "$session_name"; then
 				continue
 			fi
 			full_command="$(pane_full_command $pane_pid)"
 			dir=$(echo $dir | sed 's/ /\\ /') # escape all spaces in directory path
-			echo "${line_type}${d}${session_name}${d}${window_number}${d}${window_active}${d}${window_flags}${d}${pane_index}${d}${pane_title}${d}${dir}${d}${pane_active}${d}${pane_command}${d}:${full_command}"
+			TMUX_HIST_ID="$(cat ~/.tmux/history/map/$pane_id)"
+			echo "${line_type}${d}${session_name}${d}${window_number}${d}${window_active}${d}${window_flags}${d}${pane_index}${d}${pane_title}${d}${dir}${d}${pane_active}${d}${pane_command}${d}:${full_command}${d}${TMUX_HIST_ID}"
 		done
 }
 
